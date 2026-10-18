@@ -1,0 +1,14 @@
+fastapi==0.146.0
+uvicorn[standard]==0.54.0
+sqlalchemy==2.0.55
+psycopg2-binary==2.9.13
+python-jose[cryptography]==3.5.0
+passlib[argon2]==1.7.4
+pydantic-settings==2.16.0
+pydantic[email]==2.14.1
+python-multipart==0.0.32
+cloudinary==1.46.3
+
+# tests
+pytest==9.1.1
+httpx==0.28.1
