@@ -4,6 +4,7 @@ import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
 import Avatar from "../components/Avatar";
 import { Modal, useConfirm } from "../components/ConfirmDialog";
+import DeleteAccountDialog from "../components/DeleteAccountDialog";
 import Icon from "../components/Icon";
 import LoadMore from "../components/LoadMore";
 import Menu from "../components/Menu";
@@ -28,6 +29,7 @@ export default function Profile() {
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const posts = useCursorList(
     (beforeId, limit) => (profile?.can_view_posts ? api.userPosts(userId, beforeId, limit) : Promise.resolve([])),
@@ -154,6 +156,12 @@ export default function Profile() {
             {!isMe && !profile.blocked_by_me && (
               <button className="btn btn-secondary" onClick={message}>Message</button>
             )}
+            {isMe && (
+              <Menu
+                label="Account options"
+                items={[{ label: "Delete account", onSelect: () => setDeletingAccount(true), danger: true }]}
+              />
+            )}
             {!isMe && (
               <Menu
                 label="Profile options"
@@ -167,7 +175,15 @@ export default function Profile() {
         </div>
       </section>
 
-      {isMe && <EditProfileModal open={editing} onClose={() => setEditing(false)} onSaved={loadProfile} />}
+      {isMe && (
+        <EditProfileModal
+          open={editing}
+          onClose={() => setEditing(false)}
+          onSaved={loadProfile}
+          onDeleteAccount={() => { setEditing(false); setDeletingAccount(true); }}
+        />
+      )}
+      {isMe && <DeleteAccountDialog open={deletingAccount} onClose={() => setDeletingAccount(false)} />}
       {isMe && <FollowRequests onChange={loadProfile} />}
 
       {profile.blocked_by_me ? (
@@ -194,7 +210,9 @@ export default function Profile() {
   );
 }
 
-function EditProfileModal({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
+function EditProfileModal({ open, onClose, onSaved, onDeleteAccount }: {
+  open: boolean; onClose: () => void; onSaved: () => void; onDeleteAccount: () => void;
+}) {
   const { user, setUser } = useAuth();
   const [form, setForm] = useState({ username: "", bio: "", is_private: false });
   const [error, setError] = useState("");
@@ -253,6 +271,13 @@ function EditProfileModal({ open, onClose, onSaved }: { open: boolean; onClose: 
           <button className="btn btn-primary" disabled={saving}>{saving ? "Saving…" : "Save"}</button>
         </div>
       </form>
+      <section className="danger-zone" aria-labelledby="danger-zone-title">
+        <h3 id="danger-zone-title">Danger zone</h3>
+        <p className="muted small">Permanently delete your account and everything in it.</p>
+        <button type="button" className="btn btn-danger-outline btn-sm" onClick={onDeleteAccount}>
+          Delete account…
+        </button>
+      </section>
     </Modal>
   );
 }

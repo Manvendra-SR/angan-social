@@ -1,8 +1,10 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete, or_, case
 from sqlalchemy.exc import IntegrityError
+from app.core import media
 from app.core.db_errors import user_conflict
+from app.core.realtime import manager
 from app.core.notifications import (
     delete_follow_request_notification, get_counts, notify, push_counts, push_notification,
 )
@@ -16,6 +18,8 @@ from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.models.post import Post
 from app.models.follow import Follow
+from app.models.conversation import Conversation
+from app.models.notification import Notification
 from app.routers.posts import newest_first, with_liked_by_me
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -101,6 +105,50 @@ def update_me(
     if became_public:
         push_counts(background_tasks, db, current_user.id)
     return current_user
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+def delete_me(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Permanently delete the logged-in account (identified only by the token).
+
+    One DELETE on users; PostgreSQL's ON DELETE CASCADE removes everything that
+    belongs to or points at the account in the same transaction: posts (and
+    their likes, comments, notifications), the user's own likes/comments/
+    follows/blocks/requests, notifications sent or received, read markers, and
+    the user's one-to-one conversations with all their messages (a
+    conversation can't exist without both participants).
+
+    External clean-up only happens after the commit succeeds, so a failed
+    delete never removes Cloudinary images of a still-existing account.
+    """
+    user_id = current_user.id
+
+    # gather what the database can't clean up / needs to tell others about
+    image_ids = db.scalars(
+        select(Post.image_public_id).where(Post.user_id == user_id, Post.image_public_id.is_not(None))
+    ).all()
+    partners = db.scalars(
+        select(case((Conversation.user_a_id == user_id, Conversation.user_b_id), else_=Conversation.user_a_id))
+        .where(or_(Conversation.user_a_id == user_id, Conversation.user_b_id == user_id))
+    ).all()
+    notified = db.scalars(
+        select(Notification.recipient_id).where(Notification.actor_id == user_id).distinct()
+    ).all()
+
+    db.execute(delete(User).where(User.id == user_id))
+    db.commit()  # on failure nothing was deleted anywhere (no images, no sockets)
+
+    # after the response: images (only this account's, by stored public_id),
+    # live sockets of the deleted account, and badges of affected users
+    for public_id in image_ids:
+        background_tasks.add_task(media.delete_image, public_id)
+    background_tasks.add_task(manager.close_user, user_id, 4401)
+    for other_id in set(partners) | set(notified):
+        push_counts(background_tasks, db, other_id)
 
 
 @router.get("/search", response_model=list[UserSummary])

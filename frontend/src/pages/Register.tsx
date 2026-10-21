@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { api } from "../api";
+import AuthLayout from "../components/AuthLayout";
 import PasswordInput from "../components/PasswordInput";
 import { errorText } from "../utils";
 
@@ -25,10 +26,12 @@ export default function Register() {
   }
 
   return (
-    <div className="auth-page">
-      <form className="card auth-card stack" onSubmit={submit}>
-        <span className="brand brand-large">Social</span>
-        <h1>Create account</h1>
+    <AuthLayout>
+      <form className="stack" onSubmit={submit}>
+        <div>
+          <h1>Create your account</h1>
+          <p className="muted">Join Angan in less than a minute.</p>
+        </div>
         <label className="field">
           <span>Username</span>
           <input
@@ -71,6 +74,6 @@ export default function Register() {
           Already have an account? <Link to="/">Log in</Link>
         </p>
       </form>
-    </div>
+    </AuthLayout>
   );
 }

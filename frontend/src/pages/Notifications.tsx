@@ -2,7 +2,7 @@
  * Notification history. Opening this page does NOT mark anything as read:
  * a notification is read when it's clicked, or via "Mark all as read".
  */
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import Avatar from "../components/Avatar";
@@ -74,8 +74,16 @@ export default function Notifications() {
 
   const renderRow = (n: AppNotification) => (
     <li key={n.id} className={`notification ${n.is_read ? "" : "unread"}`}>
-      <button type="button" className="notification-main" onClick={() => open(n)}>
+      {/* avatar -> the person's profile; the rest of the row -> what happened */}
+      <Link
+        to={`/users/${n.actor.id}`}
+        className="notification-avatar"
+        title="View profile"
+        aria-label={`View ${n.actor.username}'s profile`}
+      >
         <Avatar user={n.actor} size={40} />
+      </Link>
+      <button type="button" className="notification-main" onClick={() => open(n)}>
         <span className="notification-text">
           <b>{n.actor.username}</b> {notificationText(n)}
           <time className="muted small" dateTime={n.created_at} title={fullDate(n.created_at)}>

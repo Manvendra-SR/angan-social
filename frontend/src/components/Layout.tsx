@@ -8,6 +8,7 @@ import { NavLink, Outlet } from "react-router";
 import { useAuth } from "../auth";
 import { useRealtime } from "../realtime";
 import Badge from "./Badge";
+import Brand from "./Brand";
 import Icon, { type IconName } from "./Icon";
 
 export default function Layout() {
@@ -25,11 +26,11 @@ export default function Layout() {
   return (
     <div className="shell">
       <header className="topbar">
-        <NavLink to="/" className="brand">Social</NavLink>
+        <NavLink to="/" className="brand-link" aria-label="Angan home"><Brand size={28} /></NavLink>
       </header>
 
       <nav className="sidenav" aria-label="Main">
-        <NavLink to="/" className="brand brand-side">Social</NavLink>
+        <NavLink to="/" className="brand-link brand-side" aria-label="Angan home"><Brand size={34} /></NavLink>
         <ul>
           {items.map((item) => (
             <li key={item.to}>

@@ -1,29 +1,37 @@
-/* Design tokens: every component uses these variables, so the look is
-   changed in one place. */
+/* Angan design tokens. Warm palette taken from the courtyard photo: ivory
+   walls, sandstone, terracotta. Every component uses these variables, so the
+   look is changed in one place. Contrast notes are against --surface (#fff). */
 :root {
   /* colours */
-  --bg: #f4f5f7;
+  --bg: #f8f3ec;              /* warm ivory page background */
+  --bg-tint: #f2e8da;         /* sandstone, used for subtle bands */
   --surface: #ffffff;
-  --surface-hover: #f2f3f5;
-  --surface-muted: #eef0f3;
-  --border: #e2e5e9;
-  --text: #16181c;
-  --text-muted: #5f6670; /* ≈ 6:1 on white (WCAG AA) */
-  --accent: #2f6fed;
-  --accent-hover: #2459c4;
-  --accent-soft: #e9f0fe;
-  --danger: #d1242f;
-  --danger-soft: #fdecec;
-  --success: #1a7f37;
-  --like: #e0245e;
+  --surface-hover: #faf5ee;
+  --surface-muted: #f4ede3;
+  --border: #e9dfd1;
+  --border-strong: #d9cab5;
+  --text: #2a211b;            /* ≈ 15:1 */
+  --text-muted: #6b5d51;      /* ≈ 6.4:1 (WCAG AA) */
+  --accent: #b5451b;          /* terracotta; white text on it ≈ 5.6:1 */
+  --accent-hover: #963813;
+  --accent-soft: #fbece3;
+  --accent-ink: #8f3412;      /* accent-coloured text on light backgrounds ≈ 7:1 */
+  --gold: #d99a3b;
+  --danger: #c42b2b;          /* ≈ 5.6:1 */
+  --danger-soft: #fdeceb;
+  --success: #2f7d4a;
+  --like: #d6336c;
 
-  /* type scale */
+  /* type */
+  --font-body: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", sans-serif;
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
   --text-xs: 12px;
   --text-sm: 14px;
   --text-md: 15px;
   --text-lg: 17px;
-  --text-xl: 20px;
-  --text-2xl: 24px;
+  --text-xl: 21px;
+  --text-2xl: 26px;
+  --text-3xl: 34px;
 
   /* spacing (4px scale) */
   --space-1: 4px;
@@ -33,15 +41,17 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
+  --space-10: 40px;
 
-  --radius: 12px;
-  --radius-sm: 8px;
+  --radius: 16px;
+  --radius-sm: 10px;
   --radius-pill: 999px;
-  --shadow: 0 6px 24px rgba(16, 24, 40, 0.12); /* menus and dialogs only */
-  --focus-ring: 0 0 0 3px rgba(47, 111, 237, 0.45);
+  --shadow-card: 0 1px 2px rgba(60, 35, 15, 0.04), 0 2px 10px rgba(60, 35, 15, 0.04);
+  --shadow: 0 12px 36px rgba(60, 35, 15, 0.16); /* menus and dialogs */
+  --focus-ring: 0 0 0 3px rgba(181, 69, 27, 0.4);
 
-  --sidebar-width: 240px;
-  --sidebar-compact: 76px;
+  --sidebar-width: 248px;
+  --sidebar-compact: 80px;
   --content-width: 620px;
-  --tabbar-height: 60px;
+  --tabbar-height: 62px;
 }

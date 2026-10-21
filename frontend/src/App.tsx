@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router";
 import { useAuth } from "./auth";
 import Layout from "./components/Layout";
+import { Logo } from "./components/Brand";
 import { Spinner } from "./components/States";
 import { RealtimeProvider } from "./realtime";
 import Chat from "./pages/Chat";
@@ -15,7 +16,14 @@ import Search from "./pages/Search";
 export default function App() {
   const { user, loading } = useAuth();
 
-  if (loading) return <Spinner />;
+  if (loading) {
+    return (
+      <div className="splash">
+        <Logo size={56} />
+        <Spinner label="Loading Angan…" />
+      </div>
+    );
+  }
 
   if (!user) {
     return (

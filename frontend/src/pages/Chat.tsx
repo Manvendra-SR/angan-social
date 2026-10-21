@@ -95,13 +95,21 @@ export default function Chat() {
         )}
         <ul>
           {conversations.map((c) => (
-            <li key={c.id}>
+            <li key={c.id} className={`conversation ${c.id === activeId ? "active" : ""} ${c.unread_count ? "unread" : ""}`}>
+              {/* avatar -> their profile; the rest of the row -> the conversation */}
               <Link
-                to={`/messages/${c.id}`}
-                className={`conversation ${c.id === activeId ? "active" : ""} ${c.unread_count ? "unread" : ""}`}
-                aria-current={c.id === activeId ? "page" : undefined}
+                to={`/users/${c.other_user.id}`}
+                className="conversation-avatar"
+                title="View profile"
+                aria-label={`View ${c.other_user.username}'s profile`}
               >
                 <Avatar user={c.other_user} size={40} />
+              </Link>
+              <Link
+                to={`/messages/${c.id}`}
+                className="conversation-link"
+                aria-current={c.id === activeId ? "page" : undefined}
+              >
                 <span className="conversation-text">
                   <span className="conversation-top">
                     <b>{c.other_user.username}</b>
@@ -319,10 +327,14 @@ function Thread({ conversationId, onRead, onSent }: ThreadProps) {
           <Icon name="back" />
         </Link>
         {other && (
-          <Link to={`/users/${other.id}`} className="author">
-            <Avatar user={other} size={32} />
-            <span className="author-name">{other.username}</span>
-          </Link>
+          <>
+            <Link to={`/users/${other.id}`} className="author" title="View profile">
+              <Avatar user={other} size={32} />
+              <span className="author-name">{other.username}</span>
+            </Link>
+            <span className="spacer" />
+            <Link to={`/users/${other.id}`} className="btn btn-secondary btn-sm">View profile</Link>
+          </>
         )}
       </header>
 

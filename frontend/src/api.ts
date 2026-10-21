@@ -95,6 +95,8 @@ export const api = {
   counts: () => get<Counts>("/users/me/counts"),
   updateMe: (data: { username?: string; bio?: string; is_private?: boolean }) =>
     request<Me>("PATCH", "/users/me", { json: data }),
+  /** permanently deletes the logged-in account (the server identifies it from the token) */
+  deleteMe: () => request<void>("DELETE", "/users/me"),
   user: (id: number) => get<Profile>(`/users/${id}`),
   userPosts: (id: number, beforeId?: number, limit = 10) =>
     get<Post[]>(`/users/${id}/posts?${cursor(limit, beforeId)}`),

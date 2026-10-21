@@ -30,6 +30,15 @@ class ConnectionManager:
     def is_connected(self, user_id: int) -> bool:
         return user_id in self.connections
 
+    async def close_user(self, user_id: int, code: int) -> None:
+        """Close every socket of a user (e.g. after their account is deleted)."""
+        for ws in list(self.connections.get(user_id, ())):
+            try:
+                await ws.close(code=code)
+            except Exception:
+                pass  # already gone
+            self.disconnect(user_id, ws)
+
     async def send_to_user(self, user_id: int, event: dict) -> None:
         # offline user: nothing to do, the data is already in the database
         for ws in list(self.connections.get(user_id, ())):

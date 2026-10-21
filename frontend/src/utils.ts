@@ -36,7 +36,8 @@ export function errorText(err: unknown): string {
 export const MAX_IMAGE_MB = 5;
 export const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
-const AVATAR_COLORS = ["#2f6fed", "#d9480f", "#2b8a3e", "#ae3ec9", "#e8590c", "#1098ad", "#c2255c", "#5f3dc4"];
+// warm, earthy tones; each keeps white initials readable (contrast >= 4.5:1)
+const AVATAR_COLORS = ["#b5451b", "#a3600a", "#2f7563", "#4f56b3", "#93395f", "#3f6f35", "#8a4b2a", "#2a6592"];
 
 /** Stable per user: the same id always gets the same colour. */
 export function avatarColor(userId: number): string {

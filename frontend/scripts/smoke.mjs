@@ -21,6 +21,8 @@ const BROWSER = argBrowser > 0 ? process.argv[argBrowser + 1] : [
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
   "/usr/bin/google-chrome", "/usr/bin/chromium", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 ].find(existsSync);
+const argShots = process.argv.indexOf("--screenshots");
+const SHOTS = argShots > 0 ? process.argv[argShots + 1] : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let passed = 0;
@@ -46,7 +48,8 @@ async function rest(method, path, tokenValue, body) {
   let payload;
   if (body instanceof URLSearchParams) payload = body;
   else if (body) { headers["Content-Type"] = "application/json"; payload = JSON.stringify(body); }
-  const res = await fetch(API + path, { method, headers, body: payload });
+  // a network blip should fail a check, not hang the whole run
+  const res = await fetch(API + path, { method, headers, body: payload, signal: AbortSignal.timeout(20000) });
   const data = res.status === 204 ? null : await res.json().catch(() => null);
   return { status: res.status, data };
 }
@@ -131,6 +134,11 @@ async function newPage(name) {
       await this.click(selector);
       await this.cmd("Input.insertText", { text });
     },
+    async screenshot(name) {
+      if (!SHOTS) return;
+      const shot = await this.cmd("Page.captureScreenshot", { format: "png" });
+      writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(shot.data, "base64"));
+    },
     async viewport(width, height = 850) {
       await this.cmd("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: width < 640 });
     },
@@ -178,6 +186,28 @@ try {
     const revealed = await a.js(`document.querySelector(".password-field input").type === "text" && document.querySelector(".password-field input").value === "secret123"`);
     check(`${path === "/" ? "login" : "register"}: password toggle visible and works`, shown && revealed);
   }
+
+  // ---------- Angan branding + the courtyard photo
+  await a.goto("/");
+  await a.waitFor(`!!document.querySelector(".auth-visual")`);
+  check("title and branding say Angan", await a.waitFor(`document.title === "Angan" && document.querySelector(".brand-name")?.textContent === "Angan"`));
+  check("courtyard photo loads on the login page", await a.js(`new Promise((resolve) => {
+    const bg = getComputedStyle(document.querySelector(".auth-visual")).backgroundImage; // url("...")
+    const url = bg.startsWith('url("') ? bg.slice(5, -2) : null;
+    if (!url) return resolve(false);
+    const img = new Image();
+    img.onload = () => resolve(img.naturalWidth > 0);
+    img.onerror = () => resolve(false);
+    img.src = url;
+  })`));
+  for (const width of [1280, 375]) {
+    await a.viewport(width);
+    await a.goto("/");
+    await a.waitFor(`!!document.querySelector(".auth-card")`);
+    await sleep(300);
+    await a.screenshot(`login-${width}`);
+  }
+  await a.viewport(1280);
 
   // ---------- register + login through the UI (user A)
   await a.goto("/register");
@@ -335,6 +365,44 @@ try {
   }
   await a.viewport(1280);
 
+  if (SHOTS) {
+    for (const width of [1280, 375]) {
+      await a.viewport(width);
+      for (const [name, path, ready] of [
+        ["feed", "/", ".post"],
+        ["profile", `/users/${userA.id}`, ".post"],
+        ["notifications", "/notifications", ".notification, .state.empty"],
+        ["chat", `/messages/${conversationId}`, ".bubble"],
+      ]) {
+        await a.goto(path);
+        await a.waitFor(`!!document.querySelector(${JSON.stringify(ready)})`);
+        await sleep(400);
+        await a.screenshot(`${name}-${width}`);
+      }
+    }
+    await a.viewport(1280);
+  }
+
+  // ---------- account deletion through the UI (user A)
+  await a.goto(`/users/${userA.id}`);
+  await a.waitFor(`!!document.querySelector('[aria-label="Account options"]')`);
+  await a.click('[aria-label="Account options"]');
+  await a.clickText("button", "Delete account");
+  check("delete dialog opens and needs the username typed", await a.waitFor(`document.querySelector("dialog[open]")?.innerText.includes("Delete your account?")`)
+    && await a.js(`[...document.querySelectorAll("dialog[open] button")].find(b => b.textContent.includes("Delete my account")).disabled`));
+  check("...opening it deleted nothing", (await rest("GET", "/users/me", userA.token)).status === 200);
+  await a.screenshot("delete-dialog-1280");
+  await a.type("dialog[open] input", userA.username);
+  await a.clickText("button", "Delete my account");
+  check("after deletion: back on the login page with a notice", await a.waitFor(`document.body.innerText.includes("Your account has been deleted") && !!document.querySelector(".auth-card")`, 10000));
+  check("...token removed from the browser", (await a.js(`localStorage.getItem("token")`)) === null);
+  check("...old token rejected by the API", (await rest("GET", "/users/me", userA.token)).status === 401);
+  const relogin = await rest("POST", "/auth/login", null, new URLSearchParams({ username: A.email, password: A.password }));
+  check("...old password no longer logs in", relogin.status === 401);
+  check("...no signed-in screens remain", await a.js(`!document.querySelector(".sidenav")`));
+  createdPosts.length = 0; // went with the account (and their images)
+  userA.deleted = true;
+
   // ---------- console / network hygiene
   for (const p of [a, b]) {
     const hosts = [...new Set(p.requests.map((r) => new URL(r.split(" ")[1]))
@@ -349,12 +417,12 @@ try {
   failures.push("crashed: " + err.message);
   console.log("FAIL  crashed: " + err.message);
 } finally {
-  // cleanup: posts (and their Cloudinary images) go; the two smoke users stay (no delete endpoint)
+  // cleanup: delete the throwaway accounts (their posts and images go with them)
   for (const id of createdPosts) await rest("DELETE", `/posts/${id}`, userA?.token).catch(() => {});
+  for (const u of [userA, userB]) if (u?.token && !u.deleted) await rest("DELETE", "/users/me", u.token).catch(() => {});
   socket.close();
   browser.kill();
 }
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
-if (userA && userB) console.log(`(test accounts left in the database: ${userA.username}, ${userB.username})`);
 process.exit(failures.length ? 1 : 0);
