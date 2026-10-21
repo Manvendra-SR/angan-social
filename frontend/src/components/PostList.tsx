@@ -1,14 +1,16 @@
 import type { Post } from "../types";
 import PostCard from "./PostCard";
+import { EmptyState } from "./States";
 
 interface Props {
   posts: Post[];
   setPosts: (update: (prev: Post[]) => Post[]) => void;
-  empty: string;
+  emptyTitle: string;
+  emptyText?: string;
 }
 
-export default function PostList({ posts, setPosts, empty }: Props) {
-  if (posts.length === 0) return <p className="muted center">{empty}</p>;
+export default function PostList({ posts, setPosts, emptyTitle, emptyText }: Props) {
+  if (posts.length === 0) return <EmptyState title={emptyTitle}>{emptyText}</EmptyState>;
 
   return (
     <>

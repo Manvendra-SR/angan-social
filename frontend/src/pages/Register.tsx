@@ -26,10 +26,11 @@ export default function Register() {
 
   return (
     <div className="auth-page">
-      <form className="card stack" onSubmit={submit}>
+      <form className="card auth-card stack" onSubmit={submit}>
+        <span className="brand brand-large">Social</span>
         <h1>Create account</h1>
-        <label>
-          Username
+        <label className="field">
+          <span>Username</span>
           <input
             value={form.username}
             onChange={(e) => setForm({ ...form, username: e.target.value })}
@@ -37,20 +38,24 @@ export default function Register() {
             title="3–30 letters, numbers or underscores"
             required
             autoFocus
+            autoComplete="username"
           />
+          <span className="hint">3–30 letters, numbers or underscores</span>
         </label>
-        <label>
-          Email
-          <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+        <label className="field">
+          <span>Email</span>
+          <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required autoComplete="email" />
         </label>
-        <label>
-          Password
+        <label className="field">
+          <span>Password</span>
           <PasswordInput
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
             minLength={8}
             required
+            autoComplete="new-password"
           />
+          <span className="hint">At least 8 characters</span>
         </label>
         <label className="checkbox">
           <input
@@ -58,11 +63,11 @@ export default function Register() {
             checked={form.is_private}
             onChange={(e) => setForm({ ...form, is_private: e.target.checked })}
           />
-          Private account (only approved followers see your posts)
+          Private account (only your followers can see your posts)
         </label>
-        {error && <p className="error">{error}</p>}
-        <button disabled={busy}>{busy ? "Creating…" : "Sign up"}</button>
-        <p className="muted small">
+        {error && <p className="error" role="alert">{error}</p>}
+        <button className="btn btn-primary btn-block" disabled={busy}>{busy ? "Creating…" : "Sign up"}</button>
+        <p className="muted small center">
           Already have an account? <Link to="/">Log in</Link>
         </p>
       </form>

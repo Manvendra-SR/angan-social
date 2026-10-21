@@ -59,8 +59,8 @@ def test_feed_pagination_newest_first(client, make_user):
         create_post(client, h, f"post {i}")
 
     page1 = client.get("/posts/feed?limit=2", headers=h).json()
-    page2 = client.get("/posts/feed?limit=2&offset=2", headers=h).json()
-    page3 = client.get("/posts/feed?limit=2&offset=4", headers=h).json()
+    page2 = client.get(f"/posts/feed?limit=2&before_id={page1[-1]['id']}", headers=h).json()
+    page3 = client.get(f"/posts/feed?limit=2&before_id={page2[-1]['id']}", headers=h).json()
     assert [p["content"] for p in page1] == ["post 4", "post 3"]
     assert [p["content"] for p in page2] == ["post 2", "post 1"]
     assert [p["content"] for p in page3] == ["post 0"]

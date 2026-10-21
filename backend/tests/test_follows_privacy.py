@@ -58,6 +58,37 @@ def test_block_hides_posts_both_ways(client, make_user):
     assert client.get(f"/posts/{b_post['id']}", headers=alice_h).status_code == 200
 
 
+def test_counts_ignore_pending_requests_and_blocks(client, make_user):
+    alice, alice_h = make_user("alice", is_private=True)
+    bob, bob_h = make_user("bob")
+    carol, _ = make_user("carol")
+
+    client.post(f"/follows/{alice['id']}", headers=bob_h)       # pending
+    client.post(f"/follows/{carol['id']}/block", headers=alice_h)  # block row
+    a = client.get(f"/users/{alice['id']}", headers=alice_h).json()
+    b = client.get(f"/users/{bob['id']}", headers=bob_h).json()
+    assert (a["followers_count"], a["following_count"]) == (0, 0)
+    assert b["following_count"] == 0
+
+    client.post(f"/follows/{bob['id']}/accept", headers=alice_h)
+    assert client.get(f"/users/{alice['id']}", headers=alice_h).json()["followers_count"] == 1
+    assert client.get(f"/users/{bob['id']}", headers=bob_h).json()["following_count"] == 1
+
+
+def test_blocker_sees_limited_profile_to_unblock(client, make_user):
+    alice, alice_h = make_user("alice")
+    bob, bob_h = make_user("bob")
+    client.post(f"/follows/{bob['id']}/block", headers=alice_h)
+
+    profile = client.get(f"/users/{bob['id']}", headers=alice_h).json()
+    assert profile["blocked_by_me"] is True and profile["can_view_posts"] is False
+    # the blocked user still can't see the blocker at all
+    assert client.get(f"/users/{alice['id']}", headers=bob_h).status_code == 403
+    # and doesn't find them in search
+    assert client.get("/users/search?q=ali", headers=bob_h).json() == []
+    assert [u["username"] for u in client.get("/users/search?q=bo", headers=alice_h).json()] == ["bob"]
+
+
 def test_block_invalid_targets(client, make_user):
     alice, alice_h = make_user("alice")
     assert client.post(f"/follows/{alice['id']}/block", headers=alice_h).status_code == 400

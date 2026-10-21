@@ -1,17 +1,21 @@
 import { Navigate, Route, Routes } from "react-router";
 import { useAuth } from "./auth";
 import Layout from "./components/Layout";
-import Login from "./pages/Login";
-import Register from "./pages/Register";
-import Feed from "./pages/Feed";
-import Profile from "./pages/Profile";
-import People from "./pages/People";
+import { Spinner } from "./components/States";
+import { RealtimeProvider } from "./realtime";
 import Chat from "./pages/Chat";
+import Feed from "./pages/Feed";
+import Login from "./pages/Login";
+import Notifications from "./pages/Notifications";
+import PostDetail from "./pages/PostDetail";
+import Profile from "./pages/Profile";
+import Register from "./pages/Register";
+import Search from "./pages/Search";
 
 export default function App() {
   const { user, loading } = useAuth();
 
-  if (loading) return <p className="center muted">Loading…</p>;
+  if (loading) return <Spinner />;
 
   if (!user) {
     return (
@@ -23,15 +27,21 @@ export default function App() {
   }
 
   return (
-    <Routes>
-      <Route element={<Layout />}>
-        <Route index element={<Feed />} />
-        <Route path="users/:id" element={<Profile />} />
-        <Route path="people" element={<People />} />
-        <Route path="messages" element={<Chat />} />
-        <Route path="messages/:id" element={<Chat />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Route>
-    </Routes>
+    // one realtime connection per logged-in session (key: a new user gets a new socket)
+    <RealtimeProvider key={user.id}>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route index element={<Feed />} />
+          <Route path="posts/:id" element={<PostDetail />} />
+          <Route path="users/:id" element={<Profile />} />
+          <Route path="search" element={<Search />} />
+          <Route path="people" element={<Navigate to="/search" replace />} />
+          <Route path="notifications" element={<Notifications />} />
+          <Route path="messages" element={<Chat />} />
+          <Route path="messages/:id" element={<Chat />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+    </RealtimeProvider>
   );
 }

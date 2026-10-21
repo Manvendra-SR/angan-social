@@ -1,10 +1,15 @@
-from fastapi import APIRouter, Depends, status, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, status, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, or_, and_
 from sqlalchemy.exc import IntegrityError
+from app.core.notifications import (
+    delete_follow_request_notification, notify, push_counts, push_notification,
+)
 from app.dependencies.database import get_db
 from app.dependencies.auth import get_current_user
+from app.dependencies.pagination import Page, get_page
 from app.models.follow import Follow
+from app.models.notification import Notification
 from app.models.user import User
 from app.schemas.follow import FollowRequestOut
 
@@ -14,6 +19,7 @@ router = APIRouter(prefix="/follows", tags=["Follows"])
 @router.post("/{user_id}", status_code=status.HTTP_201_CREATED)
 def follow_user(
     user_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -68,12 +74,19 @@ def follow_user(
     )
     db.add(follow)
     try:
-        db.commit()
+        db.flush()
     except IntegrityError:
         # concurrent duplicate request hit the unique constraint
         db.rollback()
         raise HTTPException(status_code=409, detail="Follow already exists")
 
+    # private account -> a request to approve; public account -> a new follower
+    notification = notify(
+        db, recipient_id=user_id, actor_id=current_user.id,
+        type="follow_request" if target.is_private else "follow",
+    )
+    db.commit()
+    push_notification(background_tasks, db, notification)
     return {"status": status_value}
 
 
@@ -97,12 +110,14 @@ def unfollow_user(
             detail="You are not following this user",
         )
 
+    # the "follow" notification is kept as history (re-following won't duplicate it)
     db.commit()
 
 
 @router.delete("/{user_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
 def cancel_follow_request(
     user_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -120,11 +135,15 @@ def cancel_follow_request(
             detail="No pending request found",
         )
 
+    # a cancelled request can no longer be accepted, so its notification goes
+    delete_follow_request_notification(db, owner_id=user_id, requester_id=current_user.id)
     db.commit()
+    push_counts(background_tasks, db, user_id)
 
 
 @router.get("/requests", response_model=list[FollowRequestOut])
 def get_follow_requests(
+    page: Page = Depends(get_page),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -139,7 +158,9 @@ def get_follow_requests(
             Follow.following_id == current_user.id,
             Follow.status == "pending",
         )
-        .order_by(Follow.created_at.desc())
+        .order_by(Follow.created_at.desc(), Follow.id.desc())
+        .limit(page.limit)
+        .offset(page.offset)
     )
 
     return db.execute(stmt).all()
@@ -148,6 +169,7 @@ def get_follow_requests(
 @router.post("/{follower_id}/accept")
 def accept_follow(
     follower_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -163,14 +185,21 @@ def accept_follow(
         raise HTTPException(status_code=404, detail="Request not found")
 
     follow.status = "accepted"
+    delete_follow_request_notification(db, owner_id=current_user.id, requester_id=follower_id)
+    notification = notify(
+        db, recipient_id=follower_id, actor_id=current_user.id, type="follow_accepted"
+    )
     db.commit()
 
+    push_notification(background_tasks, db, notification)
+    push_counts(background_tasks, db, current_user.id)
     return {"message": "follow request accepted"}
 
 
 @router.delete("/{follower_id}/reject", status_code=status.HTTP_204_NO_CONTENT)
 def reject_follow(
     follower_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -185,12 +214,15 @@ def reject_follow(
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Request not found")
 
+    delete_follow_request_notification(db, owner_id=current_user.id, requester_id=follower_id)
     db.commit()
+    push_counts(background_tasks, db, current_user.id)
 
 
 @router.post("/{user_id}/block")
 def block_user(
     user_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -227,7 +259,19 @@ def block_user(
         )
     )
 
+    # neither user keeps notifications about the other
+    db.execute(
+        delete(Notification).where(
+            or_(
+                and_(Notification.recipient_id == current_user.id, Notification.actor_id == user_id),
+                and_(Notification.recipient_id == user_id, Notification.actor_id == current_user.id),
+            )
+        )
+    )
+
     db.commit()
+    push_counts(background_tasks, db, current_user.id)
+    push_counts(background_tasks, db, user_id)
     return {"message": "user blocked"}
 
 

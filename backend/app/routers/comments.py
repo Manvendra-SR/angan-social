@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, status, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, status, HTTPException
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select
 from app.schemas.comment import CommentCreate, CommentOut
+from app.core.notifications import notify, push_counts, push_notification
 from app.dependencies.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.pagination import Page, get_page
@@ -25,6 +26,7 @@ def get_own_comment(comment_id: int, db: Session, current_user: User) -> Comment
 @router.post("/posts/{post_id}", response_model=CommentOut, status_code=status.HTTP_201_CREATED)
 def add_comment(
     comment: CommentCreate,
+    background_tasks: BackgroundTasks,
     post: Post = Depends(get_accessible_post),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -35,8 +37,14 @@ def add_comment(
         content=comment.content,
     )
     db.add(new_comment)
-    db.commit()
+    db.flush()  # assigns new_comment.id for the notification
+    notification = notify(
+        db, recipient_id=post.user_id, actor_id=current_user.id, type="comment",
+        post_id=post.id, comment_id=new_comment.id,
+    )
+    db.commit()  # comment + notification together
     db.refresh(new_comment)
+    push_notification(background_tasks, db, notification)
     return new_comment
 
 
@@ -74,9 +82,13 @@ def update_comment(
 @router.delete("/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_comment(
     comment_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     comment = get_own_comment(comment_id, db, current_user)
-    db.delete(comment)
+    post_owner_id = comment.post.user_id
+    db.delete(comment)  # its notification is removed by ON DELETE CASCADE
     db.commit()
+    if post_owner_id != current_user.id:
+        push_counts(background_tasks, db, post_owner_id)

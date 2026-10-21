@@ -6,3 +6,5 @@ from app.models.follow import Follow
 from app.models.like import Like
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.models.notification import Notification
+from app.models.conversation_read import ConversationRead

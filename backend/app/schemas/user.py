@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Annotated, Literal
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
 
 Username = Annotated[
     str,
@@ -14,6 +14,12 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     is_private: bool = False
+
+    # emails are case-insensitive: always store and compare them lowercase
+    @field_validator("email")    
+    @classmethod
+    def lowercase_email(cls, value: str) -> str:
+        return value.lower()
 
 
 class UserUpdate(BaseModel):
@@ -47,5 +53,7 @@ class UserProfile(UserSummary):
     posts_count: int
     # my relationship to this user: None, "pending" or "accepted"
     follow_status: Literal["pending", "accepted"] | None = None
+    # I blocked this user (they see a 403 instead of my profile)
+    blocked_by_me: bool = False
     # can I see their posts?
     can_view_posts: bool = True

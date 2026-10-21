@@ -1,19 +1,33 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
+from app.core.db_errors import user_conflict
+from app.core.notifications import (
+    delete_follow_request_notification, get_counts, notify, push_counts, push_notification,
+)
+from app.schemas.notification import Counts
 from app.schemas.user import UserOut, UserProfile, UserSummary, UserUpdate
 from app.schemas.post import PostOut
 from app.dependencies.database import get_db
-from app.dependencies.pagination import Page, get_page
+from app.dependencies.pagination import CursorPage, get_cursor_page
 from app.dependencies.privacy import can_view_profile, is_blocked_between
 from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.models.post import Post
 from app.models.follow import Follow
-from app.routers.posts import with_liked_by_me
+from app.routers.posts import newest_first, with_liked_by_me
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+
+def blocked_me(db: Session, me: int, other: int) -> bool:
+    """Did `other` block me? (stored as follower=me, following=other, blocked)"""
+    return db.scalar(
+        select(Follow.id).where(
+            Follow.follower_id == me, Follow.following_id == other, Follow.status == "blocked"
+        )
+    ) is not None
 
 
 def get_visible_user(user_id: int, db: Session, current_user: User) -> User:
@@ -30,9 +44,19 @@ def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+@router.get("/me/counts", response_model=Counts)
+def get_my_counts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Both navigation badges in one request."""
+    return get_counts(db, current_user.id)
+
+
 @router.patch("/me", response_model=UserOut)
 def update_me(
     data: UserUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -43,6 +67,7 @@ def update_me(
         if taken:
             raise HTTPException(status_code=409, detail="Username already taken")
 
+    became_public = data.is_private is False and current_user.is_private
     if data.username is not None:
         current_user.username = data.username
     if data.is_private is not None:
@@ -50,12 +75,31 @@ def update_me(
     if "bio" in data.model_fields_set:
         current_user.bio = data.bio or None  # "" clears the bio
 
+    # a public account has no approval step: accept everyone who was waiting
+    accepted_notifications = []
+    if became_public:
+        pending = db.scalars(
+            select(Follow).where(Follow.following_id == current_user.id, Follow.status == "pending")
+        ).all()
+        for follow in pending:
+            follow.status = "accepted"
+            delete_follow_request_notification(db, owner_id=current_user.id, requester_id=follow.follower_id)
+            accepted_notifications.append(notify(
+                db, recipient_id=follow.follower_id, actor_id=current_user.id, type="follow_accepted"
+            ))
+
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
+        # someone took the username between our check and the commit
         db.rollback()
-        raise HTTPException(status_code=409, detail="Username already taken")
+        raise user_conflict(exc)
     db.refresh(current_user)
+
+    for notification in accepted_notifications:
+        push_notification(background_tasks, db, notification)
+    if became_public:
+        push_counts(background_tasks, db, current_user.id)
     return current_user
 
 
@@ -65,9 +109,16 @@ def search_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # people who blocked me don't show up (their profile would be a 403 anyway)
+    blocked_me_subq = select(Follow.following_id).where(
+        Follow.follower_id == current_user.id, Follow.status == "blocked"
+    )
     stmt = (
         select(User)
-        .where(func.lower(User.username).startswith(q.strip().lower(), autoescape=True))
+        .where(
+            func.lower(User.username).startswith(q.strip().lower(), autoescape=True),
+            User.id.not_in(blocked_me_subq),
+        )
         .order_by(User.username)
         .limit(20)
     )
@@ -80,9 +131,16 @@ def get_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    user = get_visible_user(user_id, db, current_user)
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.id != current_user.id and blocked_me(db, current_user.id, user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
 
-    follow_status = db.scalar(
+    # someone I blocked: a minimal profile so I can find the Unblock button
+    blocked_by_me = user.id != current_user.id and is_blocked_between(db, current_user.id, user.id)
+
+    follow_status = None if blocked_by_me else db.scalar(
         select(Follow.status).where(
             Follow.follower_id == current_user.id,
             Follow.following_id == user.id,
@@ -94,14 +152,15 @@ def get_user(
     # send a follow request), but not their posts
     profile = UserProfile.model_validate(user)
     profile.follow_status = follow_status
-    profile.can_view_posts = can_view_profile(user, current_user, db)
+    profile.blocked_by_me = blocked_by_me
+    profile.can_view_posts = not blocked_by_me and can_view_profile(user, current_user, db)
     return profile
 
 
 @router.get("/{user_id}/posts", response_model=list[PostOut])
 def get_user_posts(
     user_id: int,
-    page: Page = Depends(get_page),
+    page: CursorPage = Depends(get_cursor_page),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -113,8 +172,5 @@ def get_user_posts(
         select(Post)
         .options(selectinload(Post.user))
         .where(Post.user_id == user.id)
-        .order_by(Post.created_at.desc(), Post.id.desc())
-        .limit(page.limit)
-        .offset(page.offset)
     )
-    return with_liked_by_me(db, list(db.scalars(stmt).all()), current_user)
+    return with_liked_by_me(db, list(db.scalars(newest_first(stmt, page)).all()), current_user)

@@ -1,46 +1,47 @@
-import { useEffect, useState } from "react";
+import { useLocation } from "react-router";
 import { api } from "../api";
+import LoadMore from "../components/LoadMore";
 import PostComposer from "../components/PostComposer";
 import PostList from "../components/PostList";
-import type { Post } from "../types";
-import { errorText, uniqueById } from "../utils";
+import { InlineError, SkeletonPosts } from "../components/States";
+import { useCursorList } from "../hooks/useCursorList";
+import { uniqueById } from "../utils";
 
 const PAGE = 10;
 
+/**
+ * Chronological feed (my posts, public accounts, accepted follows).
+ * Scrolling loads older posts with before_id; clicking Home again (a new
+ * location key) reloads the newest posts.
+ */
 export default function Feed() {
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  async function load(offset: number) {
-    setLoading(true);
-    try {
-      const batch = await api.feed(offset, PAGE);
-      // offset 0 only runs on mount, so `prev` can only hold posts created meanwhile
-      setPosts((prev) => uniqueById([...prev, ...batch]));
-      setHasMore(batch.length === PAGE);
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    load(0);
-  }, []);
+  const location = useLocation();
+  const feed = useCursorList((beforeId, limit) => api.feed(beforeId, limit), PAGE, [location.key]);
 
   return (
-    <div className="narrow">
-      <PostComposer onCreated={(post) => setPosts((prev) => uniqueById([post, ...prev]))} />
-      {error && <p className="error">{error}</p>}
-      {!loading || posts.length > 0 ? (
-        <PostList posts={posts} setPosts={setPosts} empty="No posts yet. Write the first one!" />
-      ) : null}
-      {loading && <p className="muted center">Loading…</p>}
-      {hasMore && !loading && (
-        <button className="secondary full" onClick={() => load(posts.length)}>Load more</button>
+    <div className="column">
+      <h1 className="page-title">Home</h1>
+      <PostComposer onCreated={(post) => feed.setItems((prev) => uniqueById([post, ...prev]))} />
+
+      {feed.status === "loading" && <SkeletonPosts />}
+      {feed.status === "error" && <InlineError message={feed.error} onRetry={feed.reload} />}
+      {feed.status === "ready" && (
+        <>
+          <PostList
+            posts={feed.items}
+            setPosts={feed.setItems}
+            emptyTitle="Your feed is empty"
+            emptyText="Write the first post, or find people to follow in Search."
+          />
+          {feed.items.length > 0 && (
+            <LoadMore
+              hasMore={feed.hasMore}
+              loading={feed.loadingMore}
+              error={feed.moreError}
+              onLoadMore={feed.loadMore}
+            />
+          )}
+        </>
       )}
     </div>
   );

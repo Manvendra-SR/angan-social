@@ -27,20 +27,21 @@ export default function Login() {
 
   return (
     <div className="auth-page">
-      <form className="card stack" onSubmit={submit}>
+      <form className="card auth-card stack" onSubmit={submit}>
+        <span className="brand brand-large">Social</span>
         <h1>Log in</h1>
-        {registered && <p className="success">Account created. Log in to continue.</p>}
-        <label>
-          Email
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
+        {registered && <p className="success" role="status">Account created. Log in to continue.</p>}
+        <label className="field">
+          <span>Email</span>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus autoComplete="email" />
         </label>
-        <label>
-          Password
-          <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <label className="field">
+          <span>Password</span>
+          <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
         </label>
-        {error && <p className="error">{error}</p>}
-        <button disabled={busy}>{busy ? "Logging in…" : "Log in"}</button>
-        <p className="muted small">
+        {error && <p className="error" role="alert">{error}</p>}
+        <button className="btn btn-primary btn-block" disabled={busy}>{busy ? "Logging in…" : "Log in"}</button>
+        <p className="muted small center">
           No account? <Link to="/register">Sign up</Link>
         </p>
       </form>

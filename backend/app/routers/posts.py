@@ -1,16 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select, or_
 from app.schemas.post import PostOut, PostUpdate
 from app.dependencies.database import get_db
 from app.dependencies.auth import get_current_user
-from app.dependencies.pagination import Page, get_page
+from app.dependencies.pagination import CursorPage, get_cursor_page
 from app.dependencies.privacy import get_accessible_post
 from app.models.post import Post
 from app.models.user import User
 from app.models.like import Like
 from app.models.follow import Follow
 from app.core import media
+from app.core.notifications import push_counts
 
 router = APIRouter(prefix="/posts", tags=["Posts"])
 
@@ -70,12 +71,26 @@ def create_post(
     return with_liked_by_me(db, [new_post], current_user)[0]
 
 
+def newest_first(stmt, page: CursorPage):
+    """Apply the descending-id cursor: ids only grow, so posts created after
+    the first page can never shift later pages (no repeats, no skips)."""
+    if page.before_id is not None:
+        stmt = stmt.where(Post.id < page.before_id)
+    return stmt.order_by(Post.id.desc()).limit(page.limit)
+
+
 @router.get("/feed", response_model=list[PostOut])
 def get_feed(
-    page: Page = Depends(get_page),
+    page: CursorPage = Depends(get_cursor_page),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Chronological feed: my posts, every public account's posts (discovery)
+    and private accounts I'm an accepted follower of, minus blocks both ways.
+
+    The conditions are OR-ed in one WHERE over posts (joined 1:1 to the author),
+    not UNION-ed, so a post that qualifies twice is still one row.
+    """
     following_subq = (
         select(Follow.following_id)
         .where(
@@ -115,12 +130,9 @@ def get_feed(
             Post.user_id.not_in(blocked_by_me_subq),
             Post.user_id.not_in(blocked_me_subq),
         )
-        .order_by(Post.created_at.desc(), Post.id.desc())
-        .limit(page.limit)
-        .offset(page.offset)
     )
 
-    return with_liked_by_me(db, list(db.scalars(stmt).all()), current_user)
+    return with_liked_by_me(db, list(db.scalars(newest_first(stmt, page)).all()), current_user)
 
 
 @router.get("/{post_id}", response_model=PostOut)
@@ -181,13 +193,15 @@ def replace_post_image(
 @router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_post(
     post_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     post = get_own_post(post_id, db, current_user)
     public_id = post.image_public_id
 
-    db.delete(post)  # comments and likes are removed by ON DELETE CASCADE
+    db.delete(post)  # comments, likes and their notifications go via ON DELETE CASCADE
     db.commit()
 
     media.delete_image(public_id)
+    push_counts(background_tasks, db, current_user.id)

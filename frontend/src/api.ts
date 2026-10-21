@@ -1,6 +1,8 @@
 import type {
+  AppNotification,
   Comment,
   Conversation,
+  Counts,
   FollowRequest,
   Me,
   Message,
@@ -10,7 +12,9 @@ import type {
 } from "./types";
 
 // set in frontend/.env; Vite reads it at startup, so restart `npm run dev` after changing it
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8080";
+export const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8080";
+/** ws://host/ws (or wss:// when the API is served over https) */
+export const WS_URL = API_URL.replace(/^http/, "ws") + "/ws";
 const TOKEN_KEY = "token";
 
 export const token = {
@@ -35,10 +39,10 @@ function errorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-type Body = { json?: unknown; form?: FormData | URLSearchParams };
+type Body = { json?: unknown; form?: FormData | URLSearchParams; headers?: Record<string, string> };
 
 async function request<T>(method: string, path: string, body: Body = {}): Promise<T> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...body.headers };
   const t = token.get();
   if (t) headers.Authorization = `Bearer ${t}`;
 
@@ -69,7 +73,13 @@ async function request<T>(method: string, path: string, body: Body = {}): Promis
 }
 
 const get = <T>(path: string) => request<T>("GET", path);
-const page = (limit: number, offset: number) => `limit=${limit}&offset=${offset}`;
+
+/** ?limit=..&before_id=.. for newest-first cursor lists */
+function cursor(limit: number, beforeId?: number) {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (beforeId) q.set("before_id", String(beforeId));
+  return q.toString();
+}
 
 export const api = {
   // auth
@@ -82,15 +92,17 @@ export const api = {
 
   // users
   me: () => get<Me>("/users/me"),
+  counts: () => get<Counts>("/users/me/counts"),
   updateMe: (data: { username?: string; bio?: string; is_private?: boolean }) =>
     request<Me>("PATCH", "/users/me", { json: data }),
   user: (id: number) => get<Profile>(`/users/${id}`),
-  userPosts: (id: number, offset = 0, limit = 10) =>
-    get<Post[]>(`/users/${id}/posts?${page(limit, offset)}`),
+  userPosts: (id: number, beforeId?: number, limit = 10) =>
+    get<Post[]>(`/users/${id}/posts?${cursor(limit, beforeId)}`),
   searchUsers: (q: string) => get<UserSummary[]>(`/users/search?q=${encodeURIComponent(q)}`),
 
   // posts
-  feed: (offset = 0, limit = 10) => get<Post[]>(`/posts/feed?${page(limit, offset)}`),
+  feed: (beforeId?: number, limit = 10) => get<Post[]>(`/posts/feed?${cursor(limit, beforeId)}`),
+  post: (id: number) => get<Post>(`/posts/${id}`),
   createPost: (form: FormData) => request<Post>("POST", "/posts", { form }),
   updatePost: (id: number, content: string) =>
     request<Post>("PATCH", `/posts/${id}`, { json: { content } }),
@@ -98,9 +110,9 @@ export const api = {
   like: (id: number) => request<void>("POST", `/likes/${id}`),
   unlike: (id: number) => request<void>("DELETE", `/likes/${id}`),
 
-  // comments
+  // comments (offset pagination, oldest first)
   comments: (postId: number, offset = 0, limit = 20) =>
-    get<Comment[]>(`/comments/posts/${postId}?${page(limit, offset)}`),
+    get<Comment[]>(`/comments/posts/${postId}?limit=${limit}&offset=${offset}`),
   addComment: (postId: number, content: string) =>
     request<Comment>("POST", `/comments/posts/${postId}`, { json: { content } }),
   deleteComment: (id: number) => request<void>("DELETE", `/comments/${id}`),
@@ -109,12 +121,21 @@ export const api = {
   follow: (id: number) => request<{ status: string }>("POST", `/follows/${id}`),
   unfollow: (id: number) => request<void>("DELETE", `/follows/${id}`),
   cancelFollow: (id: number) => request<void>("DELETE", `/follows/${id}/cancel`),
-  followRequests: () => get<FollowRequest[]>("/follows/requests"),
+  followRequests: () => get<FollowRequest[]>("/follows/requests?limit=50"),
   acceptFollow: (id: number) => request<void>("POST", `/follows/${id}/accept`),
   rejectFollow: (id: number) => request<void>("DELETE", `/follows/${id}/reject`),
+  block: (id: number) => request<void>("POST", `/follows/${id}/block`),
+  unblock: (id: number) => request<void>("DELETE", `/follows/${id}/unblock`),
+
+  // notifications
+  notifications: (beforeId?: number, limit = 20) =>
+    get<AppNotification[]>(`/notifications?${cursor(limit, beforeId)}`),
+  markNotificationRead: (id: number) => request<Counts>("POST", `/notifications/${id}/read`),
+  markAllNotificationsRead: () => request<Counts>("POST", "/notifications/read-all"),
 
   // messages
   conversations: () => get<Conversation[]>("/conversations?limit=50"),
+  conversation: (id: number) => get<Conversation>(`/conversations/${id}`),
   startConversation: (userId: number) =>
     request<Conversation>("POST", "/conversations", { json: { user_id: userId } }),
   messages: (conversationId: number, cursor: { before?: number; after?: number } = {}) => {
@@ -123,6 +144,14 @@ export const api = {
     if (cursor.after !== undefined) q.set("after_id", String(cursor.after));
     return get<Message[]>(`/conversations/${conversationId}/messages?${q}`);
   },
-  sendMessage: (conversationId: number, body: string) =>
-    request<Message>("POST", `/conversations/${conversationId}/messages`, { json: { body } }),
+  /** idempotencyKey: one per logical send, reused for retries -> never duplicated */
+  sendMessage: (conversationId: number, body: string, idempotencyKey: string) =>
+    request<Message>("POST", `/conversations/${conversationId}/messages`, {
+      json: { body },
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
+  markConversationRead: (conversationId: number, lastReadMessageId: number) =>
+    request<Counts>("POST", `/conversations/${conversationId}/read`, {
+      json: { last_read_message_id: lastReadMessageId },
+    }),
 };

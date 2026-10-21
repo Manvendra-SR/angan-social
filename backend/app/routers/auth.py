@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.dependencies.database import get_db
 from app.schemas.user import UserCreate, UserOut
 from app.models.user import User
+from app.core.db_errors import user_conflict
 from app.core.security import (
     hash_password,
     verify_password,
@@ -17,26 +18,25 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(user: UserCreate, db: Session = Depends(get_db)):
-    email = user.email.lower()
-
-    if db.scalar(select(User.id).where(User.email == email)):
+    # friendly early checks; the unique indexes on lower(...) are the real guard
+    if db.scalar(select(User.id).where(func.lower(User.email) == user.email)):
         raise HTTPException(status_code=409, detail="Email already registered")
     if db.scalar(select(User.id).where(func.lower(User.username) == user.username.lower())):
         raise HTTPException(status_code=409, detail="Username already taken")
 
     new_user = User(
         username=user.username,
-        email=email,
+        email=user.email,  # lowercased by the schema
         password_hash=hash_password(user.password),
         is_private=user.is_private,
     )
     db.add(new_user)
     try:
         db.commit()
-    except IntegrityError:
-        # two concurrent registrations with the same email/username
+    except IntegrityError as exc:
+        # a concurrent registration took the name/email after our check
         db.rollback()
-        raise HTTPException(status_code=409, detail="Email or username already taken")
+        raise user_conflict(exc)
     db.refresh(new_user)
     return new_user
 

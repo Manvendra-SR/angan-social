@@ -1,5 +1,7 @@
-export function timeAgo(iso: string): string {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+import type { AppNotification } from "./types";
+
+export function timeAgo(iso: string, now = Date.now()): string {
+  const seconds = Math.floor((now - new Date(iso).getTime()) / 1000);
   if (seconds < 60) return "just now";
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
@@ -10,11 +12,16 @@ export function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+/** Full date + time, used as a tooltip next to relative times. */
+export function fullDate(iso: string): string {
+  return new Date(iso).toLocaleString();
+}
+
 /** Keep the first occurrence of each id.
  *
  * Lists can receive the same item twice: a post created while the first page
- * is loading may come back in that page too, and with offset pagination new
- * posts shift the next page so it repeats items already shown.
+ * is loading may come back in that page too, and a pushed message may also
+ * arrive in a REST response.
  */
 export function uniqueById<T extends { id: number }>(items: T[]): T[] {
   const seen = new Set<number>();
@@ -28,3 +35,55 @@ export function errorText(err: unknown): string {
 // mirrors the backend limits so users get instant feedback
 export const MAX_IMAGE_MB = 5;
 export const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+const AVATAR_COLORS = ["#2f6fed", "#d9480f", "#2b8a3e", "#ae3ec9", "#e8590c", "#1098ad", "#c2255c", "#5f3dc4"];
+
+/** Stable per user: the same id always gets the same colour. */
+export function avatarColor(userId: number): string {
+  return AVATAR_COLORS[Math.abs(userId) % AVATAR_COLORS.length];
+}
+
+export function initials(username: string): string {
+  return username.slice(0, 2).toUpperCase();
+}
+
+/** Ask Cloudinary for a resized, auto-format copy instead of the original upload. */
+export function optimizedImageUrl(url: string, width = 1080): string {
+  const marker = "/image/upload/";
+  if (!url.includes("res.cloudinary.com") || !url.includes(marker)) return url;
+  return url.replace(marker, `${marker}f_auto,q_auto,w_${width}/`);
+}
+
+export function badgeLabel(count: number): string {
+  return count > 9 ? "9+" : String(count);
+}
+
+const NOTIFICATION_TEXT: Record<AppNotification["type"], string> = {
+  follow_request: "requested to follow you",
+  follow: "started following you",
+  follow_accepted: "accepted your follow request",
+  like: "liked your post",
+  comment: "commented on your post",
+};
+
+export function notificationText(n: AppNotification): string {
+  return NOTIFICATION_TEXT[n.type];
+}
+
+/** Where clicking a notification goes. */
+export function notificationLink(n: AppNotification, myId: number): string {
+  switch (n.type) {
+    case "like":
+    case "comment":
+      return `/posts/${n.post_id}`;
+    case "follow_request":
+      return `/users/${myId}#requests`;
+    default:
+      return `/users/${n.actor.id}`;
+  }
+}
+
+/** Random key for one logical message send (reused for its retries). */
+export function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}

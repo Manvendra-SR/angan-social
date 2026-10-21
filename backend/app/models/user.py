@@ -1,5 +1,5 @@
 # models/user.py
-from sqlalchemy import String, Boolean, DateTime, func, select
+from sqlalchemy import String, Boolean, DateTime, Index, func, select
 from sqlalchemy.orm import Mapped, mapped_column, relationship, column_property
 from .base import Base
 from .follow import Follow
@@ -50,16 +50,18 @@ class User(Base):
         cascade="all, delete-orphan",
     )
 
+    # only accepted follows count; pending requests and blocks (also stored in
+    # the follows table) must not inflate the numbers
     followers_count = column_property(
         select(func.count(Follow.follower_id))
-        .where(Follow.following_id == id)
+        .where(Follow.following_id == id, Follow.status == "accepted")
         .correlate_except(Follow)
         .scalar_subquery()
     )
 
     following_count = column_property(
         select(func.count(Follow.following_id))
-        .where(Follow.follower_id == id)
+        .where(Follow.follower_id == id, Follow.status == "accepted")
         .correlate_except(Follow)
         .scalar_subquery()
     )
@@ -71,3 +73,10 @@ class User(Base):
         .scalar_subquery()
     )
 
+
+# Case-insensitive uniqueness, enforced by the database even when two requests
+# race past the Python pre-check. Usernames keep their display casing; emails
+# are stored lowercase (see schemas/user.py). Existing databases get these via
+# `python -m app.migrate`.
+USERNAME_LOWER_INDEX = Index("uq_users_username_lower", func.lower(User.username), unique=True)
+EMAIL_LOWER_INDEX = Index("uq_users_email_lower", func.lower(User.email), unique=True)
